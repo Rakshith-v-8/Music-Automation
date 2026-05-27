@@ -27,25 +27,6 @@ HEADERS = {
 FUZZY_THRESHOLD = 96
 
 # =========================================================
-# LANGUAGE MAP
-# =========================================================
-
-LANGUAGE_MAP = {
-    "en": "English",
-    "hi": "Hindi",
-    "te": "Telugu",
-    "ta": "Tamil",
-    "ml": "Malayalam",
-    "kn": "Kannada",
-    "mr": "Marathi",
-    "bn": "Bengali",
-    "gu": "Gujarati",
-    "ja": "Japanese",
-    "ko": "Korean",
-    "zh": "Chinese"
-}
-
-# =========================================================
 # HELPERS
 # =========================================================
 
@@ -250,6 +231,111 @@ def parse_duration(duration):
     return hours * 3600 + minutes * 60 + seconds
 
 # =========================================================
+# LANGUAGE DETECTION
+# =========================================================
+
+def detect_language(info):
+
+    title = info.get("track", "").lower()
+    artist = info.get("artist", "").lower()
+    description = info.get("description", "").lower()
+
+    full_text = f"{title} {artist} {description}"
+
+    # =====================================================
+    # UNICODE DETECTION
+    # =====================================================
+
+    for ch in full_text:
+
+        code = ord(ch)
+
+        # Telugu
+        if 0x0C00 <= code <= 0x0C7F:
+            return "Telugu"
+
+        # Tamil
+        if 0x0B80 <= code <= 0x0BFF:
+            return "Tamil"
+
+        # Kannada
+        if 0x0C80 <= code <= 0x0CFF:
+            return "Kannada"
+
+        # Malayalam
+        if 0x0D00 <= code <= 0x0D7F:
+            return "Malayalam"
+
+        # Hindi / Devanagari
+        if 0x0900 <= code <= 0x097F:
+            return "Hindi"
+
+    # =====================================================
+    # LABEL DETECTION
+    # =====================================================
+
+    label_map = {
+
+        "aditya music": "Telugu",
+        "saregama telugu": "Telugu",
+        "mango music": "Telugu",
+
+        "think music": "Tamil",
+        "sony music south": "Tamil",
+
+        "lahari music": "Kannada",
+
+        "t-series": "Hindi",
+        "zee music": "Hindi",
+        "saregama": "Hindi"
+    }
+
+    for key, value in label_map.items():
+
+        if key in full_text:
+            return value
+
+    # =====================================================
+    # KEYWORD DETECTION
+    # =====================================================
+
+    hindi_words = [
+        "jaan",
+        "dil",
+        "ishq",
+        "mohabbat"
+    ]
+
+    telugu_words = [
+        "prema",
+        "manasu",
+        "amma",
+        "anna"
+    ]
+
+    tamil_words = [
+        "anbe",
+        "thalapathy"
+    ]
+
+    for word in hindi_words:
+
+        if word in full_text:
+            return "Hindi"
+
+    for word in telugu_words:
+
+        if word in full_text:
+            return "Telugu"
+
+    for word in tamil_words:
+
+        if word in full_text:
+            return "Tamil"
+
+    return "English"
+
+# =========================================================
 # FETCH YOUTUBE METADATA
 # =========================================================
 
@@ -305,11 +391,6 @@ def fetch_youtube_metadata(url):
         channel = snippet.get("channelTitle", "")
         published = snippet.get("publishedAt", "")
 
-        language = (
-            snippet.get("defaultAudioLanguage")
-            or snippet.get("defaultLanguage")
-        )
-
         thumbnails = snippet.get("thumbnails", {})
 
         thumbnail = (
@@ -317,10 +398,6 @@ def fetch_youtube_metadata(url):
             or thumbnails.get("high", {}).get("url")
             or thumbnails.get("medium", {}).get("url")
         )
-
-        # =====================================================
-        # TITLE SPLIT
-        # =====================================================
 
         track = title
         artist = channel
@@ -351,7 +428,6 @@ def fetch_youtube_metadata(url):
             "artist": artist,
             "thumbnail": thumbnail,
             "published": published,
-            "language": language,
             "duration": details.get("duration"),
             "description": description
         }
@@ -375,10 +451,6 @@ def clean_genres(info):
 
     full_text = f"{title} {artist} {description}"
 
-    # =====================================================
-    # SOUNDTRACK
-    # =====================================================
-
     soundtrack_keywords = [
         'from "',
         "soundtrack",
@@ -392,10 +464,6 @@ def clean_genres(info):
         if word in full_text:
             genres.add("Soundtrack")
             break
-
-    # =====================================================
-    # ROMANCE
-    # =====================================================
 
     romance_keywords = [
         "love",
@@ -412,10 +480,6 @@ def clean_genres(info):
             genres.add("Romance")
             break
 
-    # =====================================================
-    # HIP HOP
-    # =====================================================
-
     hiphop_keywords = [
         "rap",
         "hip hop",
@@ -428,10 +492,6 @@ def clean_genres(info):
             genres.add("Hip Hop")
             break
 
-    # =====================================================
-    # ROCK
-    # =====================================================
-
     rock_keywords = [
         "rock",
         "metal",
@@ -443,10 +503,6 @@ def clean_genres(info):
         if word in full_text:
             genres.add("Rock")
             break
-
-    # =====================================================
-    # ELECTRONIC
-    # =====================================================
 
     electronic_keywords = [
         "edm",
@@ -461,10 +517,6 @@ def clean_genres(info):
             genres.add("Electronic")
             break
 
-    # =====================================================
-    # LOFI
-    # =====================================================
-
     lofi_keywords = [
         "lofi",
         "lo-fi",
@@ -476,10 +528,6 @@ def clean_genres(info):
         if word in full_text:
             genres.add("Lo-Fi")
             break
-
-    # =====================================================
-    # DEVOTIONAL
-    # =====================================================
 
     devotional_keywords = [
         "krishna",
@@ -495,10 +543,6 @@ def clean_genres(info):
             genres.add("Devotional")
             break
 
-    # =====================================================
-    # INDIAN FILM MUSIC
-    # =====================================================
-
     indian_music_indicators = [
         "t-series",
         "zee music",
@@ -512,10 +556,6 @@ def clean_genres(info):
         if word in full_text:
             genres.add("Indian Film Music")
             break
-
-    # =====================================================
-    # DEFAULT
-    # =====================================================
 
     if not genres:
         genres.add("Music")
@@ -557,13 +597,15 @@ def update_music_page(page, info):
     artist = info.get("artist")
     thumbnail = info.get("thumbnail")
     published = info.get("published")
-    language_code = info.get("language")
 
     duration = parse_duration(
         info.get("duration")
     )
 
+    language_name = detect_language(info)
+
     print(f"Updating: {title}")
+    print(f"Detected Language: {language_name}")
 
     # =====================================================
     # COVER
@@ -664,32 +706,21 @@ def update_music_page(page, info):
 
     if not notion_props.get("Language", {}).get("relation", []):
 
-        if language_code:
+        lid = get_or_create(
+            language_name,
+            language_cache,
+            LANGUAGE_DB_ID
+        )
 
-            language_code = language_code.lower()
+        if lid:
 
-            if "-" in language_code:
-                language_code = language_code.split("-")[0]
-
-            language_name = LANGUAGE_MAP.get(language_code)
-
-            if language_name:
-
-                lid = get_or_create(
-                    language_name,
-                    language_cache,
-                    LANGUAGE_DB_ID
-                )
-
-                if lid:
-
-                    props["Language"] = {
-                        "relation": [
-                            {
-                                "id": lid
-                            }
-                        ]
+            props["Language"] = {
+                "relation": [
+                    {
+                        "id": lid
                     }
+                ]
+            }
 
     # =====================================================
     # DURATION
@@ -767,10 +798,6 @@ def main():
                 {}
             ).get("url")
 
-            # =================================================
-            # URL CHECK
-            # =================================================
-
             if not yt_link:
 
                 print("Missing URL")
@@ -785,20 +812,12 @@ def main():
                 skipped += 1
                 continue
 
-            # =================================================
-            # SKIP FILLED
-            # =================================================
-
             if not should_update(page):
 
                 print("Skipping fully populated")
 
                 skipped += 1
                 continue
-
-            # =================================================
-            # FETCH METADATA
-            # =================================================
 
             metadata = fetch_youtube_metadata(
                 yt_link
