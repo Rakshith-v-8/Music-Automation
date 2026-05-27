@@ -243,42 +243,37 @@ def detect_language(info):
     full_text = f"{title} {artist} {description}"
 
     # =====================================================
-    # UNICODE DETECTION
+    # UNICODE
     # =====================================================
 
     for ch in full_text:
 
         code = ord(ch)
 
-        # Telugu
         if 0x0C00 <= code <= 0x0C7F:
             return "Telugu"
 
-        # Tamil
         if 0x0B80 <= code <= 0x0BFF:
             return "Tamil"
 
-        # Kannada
         if 0x0C80 <= code <= 0x0CFF:
             return "Kannada"
 
-        # Malayalam
         if 0x0D00 <= code <= 0x0D7F:
             return "Malayalam"
 
-        # Hindi / Devanagari
         if 0x0900 <= code <= 0x097F:
             return "Hindi"
 
     # =====================================================
-    # LABEL DETECTION
+    # LABELS
     # =====================================================
 
     label_map = {
 
         "aditya music": "Telugu",
-        "saregama telugu": "Telugu",
         "mango music": "Telugu",
+        "saregama telugu": "Telugu",
 
         "think music": "Tamil",
         "sony music south": "Tamil",
@@ -296,7 +291,7 @@ def detect_language(info):
             return value
 
     # =====================================================
-    # KEYWORD DETECTION
+    # KEYWORDS
     # =====================================================
 
     hindi_words = [
@@ -336,6 +331,233 @@ def detect_language(info):
     return "English"
 
 # =========================================================
+# MUSICBRAINZ GENRES
+# =========================================================
+
+def fetch_musicbrainz_genres(track, artist):
+
+    try:
+
+        headers = {
+            "User-Agent": "MusicAutomation/1.0"
+        }
+
+        response = requests.get(
+            "https://musicbrainz.org/ws/2/recording/",
+            headers=headers,
+            params={
+                "query": f'recording:"{track}" AND artist:"{artist}"',
+                "fmt": "json",
+                "limit": 5
+            },
+            timeout=20
+        )
+
+        data = safe_json(response)
+
+        recordings = data.get("recordings", [])
+
+        if not recordings:
+            return []
+
+        best = recordings[0]
+
+        genres = set()
+
+        # =================================================
+        # TAGS
+        # =================================================
+
+        tags = best.get("tags", [])
+
+        for tag in tags:
+
+            name = tag.get("name", "").title()
+
+            if name:
+                genres.add(name)
+
+        return list(genres)
+
+    except Exception as e:
+
+        print("MusicBrainz Error:", e)
+
+        return []
+
+# =========================================================
+# INDIAN CINEMATIC TAGS
+# =========================================================
+
+def detect_indian_tags(info):
+
+    scores = {}
+
+    title = info.get("track", "").lower()
+    artist = info.get("artist", "").lower()
+    description = info.get("description", "").lower()
+
+    full_text = f"{title} {artist} {description}"
+
+    tags = [
+        "Mass Song",
+        "Melody Song",
+        "Elevation Song",
+        "Love Failure Song",
+        "Folk Beat",
+        "Dance Beat",
+        "Soundtrack",
+        "Devotional"
+    ]
+
+    for tag in tags:
+        scores[tag] = 0
+
+    # =====================================================
+    # ELEVATION
+    # =====================================================
+
+    elevation_words = [
+        "theme",
+        "rage",
+        "fear",
+        "warning",
+        "arrival",
+        "hunter",
+        "anthem"
+    ]
+
+    for word in elevation_words:
+
+        if word in full_text:
+            scores["Elevation Song"] += 3
+
+    # =====================================================
+    # MASS
+    # =====================================================
+
+    mass_words = [
+        "mass",
+        "boss",
+        "king",
+        "beast",
+        "rowdy"
+    ]
+
+    for word in mass_words:
+
+        if word in full_text:
+            scores["Mass Song"] += 3
+
+    # =====================================================
+    # LOVE FAILURE
+    # =====================================================
+
+    failure_words = [
+        "breakup",
+        "vellipoyave",
+        "missing",
+        "alone",
+        "goodbye"
+    ]
+
+    for word in failure_words:
+
+        if word in full_text:
+            scores["Love Failure Song"] += 3
+
+    # =====================================================
+    # FOLK
+    # =====================================================
+
+    folk_words = [
+        "jatara",
+        "ooru",
+        "dappu",
+        "folk"
+    ]
+
+    for word in folk_words:
+
+        if word in full_text:
+            scores["Folk Beat"] += 3
+
+    # =====================================================
+    # DEVOTIONAL
+    # =====================================================
+
+    devotional_words = [
+        "krishna",
+        "mahadev",
+        "allah",
+        "bhakti",
+        "devotional"
+    ]
+
+    for word in devotional_words:
+
+        if word in full_text:
+            scores["Devotional"] += 3
+
+    # =====================================================
+    # SOUNDTRACK
+    # =====================================================
+
+    soundtrack_words = [
+        'from "',
+        "motion picture",
+        "provided to youtube",
+        "ost",
+        "soundtrack"
+    ]
+
+    for word in soundtrack_words:
+
+        if word in full_text:
+            scores["Soundtrack"] += 3
+
+    # =====================================================
+    # MELODY
+    # =====================================================
+
+    melody_words = [
+        "melody",
+        "acoustic",
+        "love",
+        "heart"
+    ]
+
+    for word in melody_words:
+
+        if word in full_text:
+            scores["Melody Song"] += 2
+
+    # =====================================================
+    # DANCE
+    # =====================================================
+
+    dance_words = [
+        "dance",
+        "party",
+        "beat",
+        "club"
+    ]
+
+    for word in dance_words:
+
+        if word in full_text:
+            scores["Dance Beat"] += 2
+
+    final_tags = []
+
+    for tag, score in scores.items():
+
+        if score >= 3:
+            final_tags.append(tag)
+
+    return final_tags
+
+# =========================================================
 # FETCH YOUTUBE METADATA
 # =========================================================
 
@@ -359,7 +581,6 @@ def fetch_youtube_metadata(url):
                 break
 
         if not video_id:
-            print("Invalid video id")
             return None
 
         response = requests.get(
@@ -438,131 +659,6 @@ def fetch_youtube_metadata(url):
         return None
 
 # =========================================================
-# GENRES
-# =========================================================
-
-def clean_genres(info):
-
-    genres = set()
-
-    title = info.get("track", "").lower()
-    artist = info.get("artist", "").lower()
-    description = info.get("description", "").lower()
-
-    full_text = f"{title} {artist} {description}"
-
-    soundtrack_keywords = [
-        'from "',
-        "soundtrack",
-        "ost",
-        "provided to youtube",
-        "motion picture"
-    ]
-
-    for word in soundtrack_keywords:
-
-        if word in full_text:
-            genres.add("Soundtrack")
-            break
-
-    romance_keywords = [
-        "love",
-        "ishq",
-        "dil",
-        "jaan",
-        "mohabbat",
-        "prema"
-    ]
-
-    for word in romance_keywords:
-
-        if word in full_text:
-            genres.add("Romance")
-            break
-
-    hiphop_keywords = [
-        "rap",
-        "hip hop",
-        "drill"
-    ]
-
-    for word in hiphop_keywords:
-
-        if word in full_text:
-            genres.add("Hip Hop")
-            break
-
-    rock_keywords = [
-        "rock",
-        "metal",
-        "punk"
-    ]
-
-    for word in rock_keywords:
-
-        if word in full_text:
-            genres.add("Rock")
-            break
-
-    electronic_keywords = [
-        "edm",
-        "electronic",
-        "techno",
-        "trance"
-    ]
-
-    for word in electronic_keywords:
-
-        if word in full_text:
-            genres.add("Electronic")
-            break
-
-    lofi_keywords = [
-        "lofi",
-        "lo-fi",
-        "chill mix"
-    ]
-
-    for word in lofi_keywords:
-
-        if word in full_text:
-            genres.add("Lo-Fi")
-            break
-
-    devotional_keywords = [
-        "krishna",
-        "mahadev",
-        "allah",
-        "bhakti",
-        "devotional"
-    ]
-
-    for word in devotional_keywords:
-
-        if word in full_text:
-            genres.add("Devotional")
-            break
-
-    indian_music_indicators = [
-        "t-series",
-        "zee music",
-        "saregama",
-        "aditya music",
-        "sony music india"
-    ]
-
-    for word in indian_music_indicators:
-
-        if word in full_text:
-            genres.add("Indian Film Music")
-            break
-
-    if not genres:
-        genres.add("Music")
-
-    return list(genres)
-
-# =========================================================
 # SHOULD UPDATE
 # =========================================================
 
@@ -608,6 +704,25 @@ def update_music_page(page, info):
     print(f"Detected Language: {language_name}")
 
     # =====================================================
+    # MUSICBRAINZ
+    # =====================================================
+
+    mb_genres = fetch_musicbrainz_genres(
+        title,
+        artist
+    )
+
+    indian_tags = detect_indian_tags(info)
+
+    all_genres = list(
+        set(
+            mb_genres + indian_tags
+        )
+    )
+
+    print("Genres:", all_genres)
+
+    # =====================================================
     # COVER
     # =====================================================
 
@@ -649,16 +764,14 @@ def update_music_page(page, info):
             }
 
     # =====================================================
-    # GENRE
+    # GENRES
     # =====================================================
 
     if not notion_props.get("Genre", {}).get("relation", []):
 
-        genres = clean_genres(info)
-
         relations = []
 
-        for genre in genres:
+        for genre in all_genres:
 
             gid = get_or_create(
                 genre,
