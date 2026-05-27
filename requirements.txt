@@ -1,0 +1,4 @@
+requests
+thefuzz
+python-Levenshtein
+yt-dlp
