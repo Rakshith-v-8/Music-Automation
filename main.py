@@ -530,7 +530,7 @@ def main():
             props = page.get("properties", {})
 
             yt_link = props.get(
-                "YT Music Link",
+                "url",
                 {}
             ).get("url")
 
