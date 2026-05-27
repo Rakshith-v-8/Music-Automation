@@ -49,16 +49,8 @@ def clean_track_title(title):
 
     remove_patterns = [
 
-        # =================================================
-        # MOVIE TAGS
-        # =================================================
-
         r'\(from ".*?"\)',
         r"\(from '.*?'\)",
-
-        # =================================================
-        # LANGUAGE TAGS
-        # =================================================
 
         r'\(telugu version\)',
         r'\(hindi version\)',
@@ -84,10 +76,6 @@ def clean_track_title(title):
         r'\[kannada\]',
         r'\[malayalam\]',
 
-        # =================================================
-        # FEAT / FT
-        # =================================================
-
         r'\(feat\..*?\)',
         r'\(ft\..*?\)',
         r'\[feat\..*?\]',
@@ -95,10 +83,6 @@ def clean_track_title(title):
 
         r'feat\..*',
         r'ft\..*',
-
-        # =================================================
-        # VIDEO TAGS
-        # =================================================
 
         r'\(official video\)',
         r'\(official lyric video\)',
@@ -116,18 +100,10 @@ def clean_track_title(title):
         r'\[full song\]',
         r'\[music video\]',
 
-        # =================================================
-        # QUALITY TAGS
-        # =================================================
-
         r'\(4k.*?\)',
         r'\(hd.*?\)',
         r'\[4k.*?\]',
         r'\[hd.*?\]',
-
-        # =================================================
-        # RAW WORDS
-        # =================================================
 
         r'official video',
         r'official lyric video',
@@ -149,10 +125,6 @@ def clean_track_title(title):
             flags=re.IGNORECASE
         )
 
-    # =====================================================
-    # REMOVE EMPTY BRACKETS
-    # =====================================================
-
     cleaned = re.sub(
         r'\(\s*\)',
         '',
@@ -165,19 +137,11 @@ def clean_track_title(title):
         cleaned
     )
 
-    # =====================================================
-    # CLEAN SPACES
-    # =====================================================
-
     cleaned = re.sub(
         r'\s+',
         ' ',
         cleaned
     ).strip()
-
-    # =====================================================
-    # REMOVE DANGLING SYMBOLS
-    # =====================================================
 
     cleaned = cleaned.strip("-|:[]() ")
 
@@ -192,37 +156,34 @@ def extract_singers(description):
     if not description:
         return []
 
-    lines = description.splitlines()
+    lines = [
+        line.strip()
+        for line in description.splitlines()
+        if line.strip()
+    ]
 
     singers = []
 
-    patterns = [
-
-        r'playback singer[s]?\s*[:\-]\s*(.*)',
-        r'singer[s]?\s*[:\-]\s*(.*)',
-        r'vocals\s*[:\-]\s*(.*)',
-        r'performed by\s*[:\-]\s*(.*)'
-    ]
+    capture = False
 
     for line in lines:
 
-        clean_line = line.strip()
+        lower = line.lower()
 
-        for pattern in patterns:
+        if (
+            "playback singer" in lower
+            or lower.startswith("singer")
+            or "performed by" in lower
+            or lower.startswith("vocals")
+        ):
 
-            match = re.search(
-                pattern,
-                clean_line,
-                flags=re.IGNORECASE
-            )
+            if ":" in line:
 
-            if match:
-
-                raw = match.group(1)
+                value = line.split(":", 1)[1]
 
                 parts = re.split(
                     r',|&| and ',
-                    raw
+                    value
                 )
 
                 for part in parts:
@@ -235,9 +196,60 @@ def extract_singers(description):
                     ):
                         singers.append(name)
 
-    singers = list(dict.fromkeys(singers))
+            else:
+                capture = True
 
-    return singers
+            continue
+
+        if capture:
+
+            stop_words = [
+
+                "composer",
+                "lyrics",
+                "lyricist",
+                "music",
+                "label",
+                "released",
+                "producer",
+                "directed",
+                "album",
+                "movie",
+                "film"
+            ]
+
+            if any(
+                stop in lower
+                for stop in stop_words
+            ):
+                capture = False
+                continue
+
+            if (
+                len(line) < 60
+                and not re.search(r'http|www|\d{4}', line)
+            ):
+
+                singers.append(line)
+
+    cleaned = []
+
+    for singer in singers:
+
+        singer = singer.strip()
+
+        singer = re.sub(
+            r'^[•\-\–]+',
+            '',
+            singer
+        ).strip()
+
+        if singer:
+            cleaned.append(singer)
+
+    cleaned = list(dict.fromkeys(cleaned))
+
+    return cleaned
 
 # =========================================================
 # FETCH ALL PAGES
@@ -409,151 +421,101 @@ def get_or_create(name, cache, db_id):
     return pid
 
 # =========================================================
-# LANGUAGE DETECTION
+# WIKIDATA LANGUAGE
 # =========================================================
 
 def detect_language(info):
 
-    title = info.get("track", "").lower()
-    artist = info.get("artist", "").lower()
-    description = info.get("description", "").lower()
+    query = (
+        info.get("track", "")
+        + " "
+        + info.get("artist", "")
+    ).strip()
 
-    full_text = f"{title} {artist} {description}"
+    try:
 
-    for ch in full_text:
+        response = requests.get(
+            "https://www.wikidata.org/w/api.php",
+            params={
+                "action": "wbsearchentities",
+                "search": query,
+                "language": "en",
+                "format": "json"
+            },
+            timeout=15
+        )
 
-        code = ord(ch)
+        data = safe_json(response)
 
-        if 0x0C00 <= code <= 0x0C7F:
-            return "Telugu"
+        search = data.get("search", [])
 
-        if 0x0B80 <= code <= 0x0BFF:
+        combined = json.dumps(search).lower()
+
+        if "tamil" in combined:
             return "Tamil"
 
-        if 0x0C80 <= code <= 0x0CFF:
-            return "Kannada"
+        if "telugu" in combined:
+            return "Telugu"
 
-        if 0x0D00 <= code <= 0x0D7F:
-            return "Malayalam"
-
-        if 0x0900 <= code <= 0x097F:
+        if "hindi" in combined:
             return "Hindi"
 
-    label_map = {
+        if "kannada" in combined:
+            return "Kannada"
 
-        "aditya music": "Telugu",
-        "mango music": "Telugu",
-        "saregama telugu": "Telugu",
+        if "malayalam" in combined:
+            return "Malayalam"
 
-        "think music": "Tamil",
-        "sony music south": "Tamil",
+    except:
+        pass
 
-        "lahari music": "Kannada",
-
-        "t-series": "Hindi",
-        "zee music": "Hindi",
-        "saregama": "Hindi"
-    }
-
-    for key, value in label_map.items():
-
-        if key in full_text:
-            return value
-
-    return "English"
+    return None
 
 # =========================================================
-# DETECT CONTEXT
+# DETECT FORMAT
 # =========================================================
 
-def detect_context(info):
+def detect_format(info):
 
-    description = info.get("description", "").lower()
     title = info.get("track", "").lower()
+    description = info.get("description", "").lower()
 
-    full_text = f"{title} {description}"
+    full = f"{title} {description}"
 
-    if "background score" in full_text:
-        return "Background Score"
+    if "podcast" in full:
+        return "Podcasts"
 
-    if "theme" in full_text:
+    if "dj mix" in full:
+        return "DJ Mixes"
+
+    if "live performance" in full:
+        return "Live Performances"
+
+    if "concert" in full:
+        return "Concerts"
+
+    if "instrumental" in full:
+        return "Instrumentals"
+
+    if "background score" in full:
+        return "Background Scores"
+
+    if "theme" in full:
         return "Theme Music"
 
-    if (
-        'from "' in full_text
-        or "motion picture" in full_text
-        or "ost" in full_text
-    ):
-        return "Soundtrack"
+    if "ost" in full:
+        return "OSTs"
 
-    return "Single"
+    if "ep" in full:
+        return "EPs"
 
-# =========================================================
-# DETECT VIBES
-# =========================================================
+    if "album" in full:
+        return "Albums"
 
-def detect_vibes(info):
+    if "single" in full:
+        return "Singles"
 
-    title = info.get("track", "").lower()
-    artist = info.get("artist", "").lower()
-    description = info.get("description", "").lower()
-
-    full_text = f"{title} {artist} {description}"
-
-    vibes = []
-
-    mass_words = [
-        "mass",
-        "boss",
-        "king",
-        "beast",
-        "rowdy"
-    ]
-
-    if any(word in full_text for word in mass_words):
-        vibes.append("Mass Song")
-
-    elevation_words = [
-        "theme",
-        "fear",
-        "rage",
-        "arrival",
-        "warning",
-        "anthem"
-    ]
-
-    if any(word in full_text for word in elevation_words):
-        vibes.append("Elevation Song")
-
-    melody_words = [
-        "melody",
-        "acoustic",
-        "soft"
-    ]
-
-    if any(word in full_text for word in melody_words):
-        vibes.append("Melody Song")
-
-    failure_words = [
-        "breakup",
-        "alone",
-        "missing",
-        "goodbye"
-    ]
-
-    if any(word in full_text for word in failure_words):
-        vibes.append("Love Failure Song")
-
-    dance_words = [
-        "dance",
-        "party",
-        "club"
-    ]
-
-    if any(word in full_text for word in dance_words):
-        vibes.append("Dance Beat")
-
-    return vibes
+    return "Songs"
 
 # =========================================================
 # FETCH YOUTUBE METADATA
@@ -678,14 +640,12 @@ def update_music_page(page, info):
     published = info.get("published")
 
     language_name = detect_language(info)
-    context = detect_context(info)
-    vibes = detect_vibes(info)
+    format_name = detect_format(info)
 
     print(f"Updating: {title}")
-    print(f"Detected Language: {language_name}")
+    print(f"Language: {language_name}")
+    print(f"Format: {format_name}")
     print(f"Singers: {singers}")
-    print(f"Context: {context}")
-    print(f"Vibes: {vibes}")
 
     # =====================================================
     # TITLE
@@ -707,8 +667,6 @@ def update_music_page(page, info):
     clean_title = title.strip()
 
     if clean_title and clean_title != current_title:
-
-        print(f"Updating Title: {clean_title}")
 
         props["Name"] = {
             "title": [
@@ -740,7 +698,7 @@ def update_music_page(page, info):
             }
 
     # =====================================================
-    # ARTISTS + SINGERS
+    # ARTISTS
     # =====================================================
 
     current_artists = notion_props.get(
@@ -783,7 +741,7 @@ def update_music_page(page, info):
     if not notion_props.get("Format", {}).get("relation", []):
 
         fid = get_or_create(
-            "Song",
+            format_name,
             format_cache,
             FORMAT_DB_ID
         )
@@ -802,7 +760,13 @@ def update_music_page(page, info):
     # LANGUAGE
     # =====================================================
 
-    if not notion_props.get("Language", {}).get("relation", []):
+    if (
+        language_name
+        and not notion_props.get(
+            "Language",
+            {}
+        ).get("relation", [])
+    ):
 
         lid = get_or_create(
             language_name,
@@ -832,49 +796,6 @@ def update_music_page(page, info):
                 "date": {
                     "start": published[:10]
                 }
-            }
-
-    # =====================================================
-    # CONTEXT
-    # =====================================================
-
-    if "Context" in notion_props:
-
-        current = notion_props.get(
-            "Context",
-            {}
-        ).get("multi_select", [])
-
-        if not current:
-
-            props["Context"] = {
-                "multi_select": [
-                    {
-                        "name": context
-                    }
-                ]
-            }
-
-    # =====================================================
-    # VIBES
-    # =====================================================
-
-    if "Mood / Vibe" in notion_props:
-
-        current = notion_props.get(
-            "Mood / Vibe",
-            {}
-        ).get("multi_select", [])
-
-        if not current and vibes:
-
-            props["Mood / Vibe"] = {
-                "multi_select": [
-                    {
-                        "name": vibe
-                    }
-                    for vibe in vibes
-                ]
             }
 
     # =====================================================
