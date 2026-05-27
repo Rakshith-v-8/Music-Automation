@@ -37,6 +37,97 @@ def safe_json(response):
         return {}
 
 # =========================================================
+# CLEAN TITLE
+# =========================================================
+
+def clean_track_title(title):
+
+    if not title:
+        return ""
+
+    cleaned = title
+
+    remove_patterns = [
+
+        # =================================================
+        # MOVIE TAGS
+        # =================================================
+
+        r'\(from ".*?"\)',
+        r"\(from '.*?'\)",
+
+        # =================================================
+        # FEAT / FT
+        # =================================================
+
+        r'\(feat\..*?\)',
+        r'\(ft\..*?\)',
+        r'\[feat\..*?\]',
+        r'\[ft\..*?\]',
+
+        r'feat\..*',
+        r'ft\..*',
+
+        # =================================================
+        # VIDEO TAGS
+        # =================================================
+
+        r'\(official video\)',
+        r'\(official lyric video\)',
+        r'\(lyric video\)',
+        r'\(audio\)',
+        r'\(video\)',
+        r'\(full song\)',
+        r'\(music video\)',
+
+        r'\[official video\]',
+        r'\[official lyric video\]',
+        r'\[lyric video\]',
+        r'\[audio\]',
+        r'\[video\]',
+        r'\[full song\]',
+        r'\[music video\]',
+
+        # =================================================
+        # QUALITY TAGS
+        # =================================================
+
+        r'\(4k.*?\)',
+        r'\(hd.*?\)',
+        r'\[4k.*?\]',
+        r'\[hd.*?\]',
+
+        r'official video',
+        r'official lyric video',
+        r'lyric video',
+        r'video song',
+        r'full song',
+        r'audio jukebox',
+        r'music video',
+        r'4k',
+        r'hd'
+    ]
+
+    for pattern in remove_patterns:
+
+        cleaned = re.sub(
+            pattern,
+            '',
+            cleaned,
+            flags=re.IGNORECASE
+        )
+
+    cleaned = re.sub(
+        r'\s+',
+        ' ',
+        cleaned
+    ).strip()
+
+    cleaned = cleaned.strip("-|:[]() ")
+
+    return cleaned
+
+# =========================================================
 # FETCH ALL PAGES
 # =========================================================
 
@@ -240,10 +331,6 @@ def detect_language(info):
 
     full_text = f"{title} {artist} {description}"
 
-    # =====================================================
-    # UNICODE
-    # =====================================================
-
     for ch in full_text:
 
         code = ord(ch)
@@ -262,10 +349,6 @@ def detect_language(info):
 
         if 0x0900 <= code <= 0x097F:
             return "Hindi"
-
-    # =====================================================
-    # LABELS
-    # =====================================================
 
     label_map = {
 
@@ -317,7 +400,7 @@ def detect_context(info):
     return "Single"
 
 # =========================================================
-# DETECT VIBE
+# DETECT VIBES
 # =========================================================
 
 def detect_vibes(info):
@@ -330,10 +413,6 @@ def detect_vibes(info):
 
     vibes = []
 
-    # =====================================================
-    # MASS
-    # =====================================================
-
     mass_words = [
         "mass",
         "boss",
@@ -344,10 +423,6 @@ def detect_vibes(info):
 
     if any(word in full_text for word in mass_words):
         vibes.append("Mass Song")
-
-    # =====================================================
-    # ELEVATION
-    # =====================================================
 
     elevation_words = [
         "theme",
@@ -361,10 +436,6 @@ def detect_vibes(info):
     if any(word in full_text for word in elevation_words):
         vibes.append("Elevation Song")
 
-    # =====================================================
-    # MELODY
-    # =====================================================
-
     melody_words = [
         "melody",
         "acoustic",
@@ -373,10 +444,6 @@ def detect_vibes(info):
 
     if any(word in full_text for word in melody_words):
         vibes.append("Melody Song")
-
-    # =====================================================
-    # LOVE FAILURE
-    # =====================================================
 
     failure_words = [
         "breakup",
@@ -387,10 +454,6 @@ def detect_vibes(info):
 
     if any(word in full_text for word in failure_words):
         vibes.append("Love Failure Song")
-
-    # =====================================================
-    # DANCE
-    # =====================================================
 
     dance_words = [
         "dance",
@@ -453,7 +516,10 @@ def fetch_youtube_metadata(url):
         snippet = item.get("snippet", {})
         details = item.get("contentDetails", {})
 
-        title = snippet.get("title", "")
+        raw_title = snippet.get("title", "")
+
+        title = clean_track_title(raw_title)
+
         description = snippet.get("description", "")
         channel = snippet.get("channelTitle", "")
         published = snippet.get("publishedAt", "")
@@ -551,6 +617,39 @@ def update_music_page(page, info):
     print(f"Detected Language: {language_name}")
     print(f"Context: {context}")
     print(f"Vibes: {vibes}")
+
+    # =====================================================
+    # TITLE
+    # =====================================================
+
+    current_title_data = notion_props.get(
+        "Name",
+        {}
+    ).get("title", [])
+
+    current_title = ""
+
+    if current_title_data:
+
+        current_title = current_title_data[0][
+            "plain_text"
+        ].strip()
+
+    clean_title = title.strip()
+
+    if clean_title and clean_title != current_title:
+
+        print(f"Updating Title: {clean_title}")
+
+        props["Name"] = {
+            "title": [
+                {
+                    "text": {
+                        "content": clean_title
+                    }
+                }
+            ]
+        }
 
     # =====================================================
     # COVER
@@ -766,13 +865,6 @@ def main():
             if "youtube" not in yt_link.lower():
 
                 print("Skipping non-youtube URL")
-
-                skipped += 1
-                continue
-
-            if not should_update(page):
-
-                print("Skipping fully populated")
 
                 skipped += 1
                 continue
