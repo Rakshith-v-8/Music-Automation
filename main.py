@@ -14,7 +14,6 @@ MAIN_DB_ID = os.environ.get("NOTION_DATABASE_ID")
 YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY")
 
 ARTIST_DB_ID = "36d451056c5e8045b879fb6a30b0b7e1"
-GENRE_DB_ID = "222451056c5e81239bc7e95a553cef45"
 FORMAT_DB_ID = "36d451056c5e8018bddfc238554cde03"
 LANGUAGE_DB_ID = "24c451056c5e80a7b6a1c22847688e3f"
 
@@ -107,7 +106,6 @@ def build_cache(database_id):
 print("Loading caches...")
 
 artist_cache = build_cache(ARTIST_DB_ID)
-genre_cache = build_cache(GENRE_DB_ID)
 format_cache = build_cache(FORMAT_DB_ID)
 language_cache = build_cache(LANGUAGE_DB_ID)
 
@@ -290,108 +288,39 @@ def detect_language(info):
         if key in full_text:
             return value
 
-    # =====================================================
-    # KEYWORDS
-    # =====================================================
-
-    hindi_words = [
-        "jaan",
-        "dil",
-        "ishq",
-        "mohabbat"
-    ]
-
-    telugu_words = [
-        "prema",
-        "manasu",
-        "amma",
-        "anna"
-    ]
-
-    tamil_words = [
-        "anbe",
-        "thalapathy"
-    ]
-
-    for word in hindi_words:
-
-        if word in full_text:
-            return "Hindi"
-
-    for word in telugu_words:
-
-        if word in full_text:
-            return "Telugu"
-
-    for word in tamil_words:
-
-        if word in full_text:
-            return "Tamil"
-
     return "English"
 
 # =========================================================
-# MUSICBRAINZ GENRES
+# DETECT CONTEXT
 # =========================================================
 
-def fetch_musicbrainz_genres(track, artist):
+def detect_context(info):
 
-    try:
+    description = info.get("description", "").lower()
+    title = info.get("track", "").lower()
 
-        headers = {
-            "User-Agent": "MusicAutomation/1.0"
-        }
+    full_text = f"{title} {description}"
 
-        response = requests.get(
-            "https://musicbrainz.org/ws/2/recording/",
-            headers=headers,
-            params={
-                "query": f'recording:"{track}" AND artist:"{artist}"',
-                "fmt": "json",
-                "limit": 5
-            },
-            timeout=20
-        )
+    if "background score" in full_text:
+        return "Background Score"
 
-        data = safe_json(response)
+    if "theme" in full_text:
+        return "Theme Music"
 
-        recordings = data.get("recordings", [])
+    if (
+        'from "' in full_text
+        or "motion picture" in full_text
+        or "ost" in full_text
+    ):
+        return "Soundtrack"
 
-        if not recordings:
-            return []
-
-        best = recordings[0]
-
-        genres = set()
-
-        # =================================================
-        # TAGS
-        # =================================================
-
-        tags = best.get("tags", [])
-
-        for tag in tags:
-
-            name = tag.get("name", "").title()
-
-            if name:
-                genres.add(name)
-
-        return list(genres)
-
-    except Exception as e:
-
-        print("MusicBrainz Error:", e)
-
-        return []
+    return "Single"
 
 # =========================================================
-# INDIAN CINEMATIC TAGS
+# DETECT VIBE
 # =========================================================
 
-def detect_indian_tags(info):
-
-    scores = {}
+def detect_vibes(info):
 
     title = info.get("track", "").lower()
     artist = info.get("artist", "").lower()
@@ -399,38 +328,7 @@ def detect_indian_tags(info):
 
     full_text = f"{title} {artist} {description}"
 
-    tags = [
-        "Mass Song",
-        "Melody Song",
-        "Elevation Song",
-        "Love Failure Song",
-        "Folk Beat",
-        "Dance Beat",
-        "Soundtrack",
-        "Devotional"
-    ]
-
-    for tag in tags:
-        scores[tag] = 0
-
-    # =====================================================
-    # ELEVATION
-    # =====================================================
-
-    elevation_words = [
-        "theme",
-        "rage",
-        "fear",
-        "warning",
-        "arrival",
-        "hunter",
-        "anthem"
-    ]
-
-    for word in elevation_words:
-
-        if word in full_text:
-            scores["Elevation Song"] += 3
+    vibes = []
 
     # =====================================================
     # MASS
@@ -444,77 +342,24 @@ def detect_indian_tags(info):
         "rowdy"
     ]
 
-    for word in mass_words:
-
-        if word in full_text:
-            scores["Mass Song"] += 3
+    if any(word in full_text for word in mass_words):
+        vibes.append("Mass Song")
 
     # =====================================================
-    # LOVE FAILURE
+    # ELEVATION
     # =====================================================
 
-    failure_words = [
-        "breakup",
-        "vellipoyave",
-        "missing",
-        "alone",
-        "goodbye"
+    elevation_words = [
+        "theme",
+        "fear",
+        "rage",
+        "arrival",
+        "warning",
+        "anthem"
     ]
 
-    for word in failure_words:
-
-        if word in full_text:
-            scores["Love Failure Song"] += 3
-
-    # =====================================================
-    # FOLK
-    # =====================================================
-
-    folk_words = [
-        "jatara",
-        "ooru",
-        "dappu",
-        "folk"
-    ]
-
-    for word in folk_words:
-
-        if word in full_text:
-            scores["Folk Beat"] += 3
-
-    # =====================================================
-    # DEVOTIONAL
-    # =====================================================
-
-    devotional_words = [
-        "krishna",
-        "mahadev",
-        "allah",
-        "bhakti",
-        "devotional"
-    ]
-
-    for word in devotional_words:
-
-        if word in full_text:
-            scores["Devotional"] += 3
-
-    # =====================================================
-    # SOUNDTRACK
-    # =====================================================
-
-    soundtrack_words = [
-        'from "',
-        "motion picture",
-        "provided to youtube",
-        "ost",
-        "soundtrack"
-    ]
-
-    for word in soundtrack_words:
-
-        if word in full_text:
-            scores["Soundtrack"] += 3
+    if any(word in full_text for word in elevation_words):
+        vibes.append("Elevation Song")
 
     # =====================================================
     # MELODY
@@ -523,14 +368,25 @@ def detect_indian_tags(info):
     melody_words = [
         "melody",
         "acoustic",
-        "love",
-        "heart"
+        "soft"
     ]
 
-    for word in melody_words:
+    if any(word in full_text for word in melody_words):
+        vibes.append("Melody Song")
 
-        if word in full_text:
-            scores["Melody Song"] += 2
+    # =====================================================
+    # LOVE FAILURE
+    # =====================================================
+
+    failure_words = [
+        "breakup",
+        "alone",
+        "missing",
+        "goodbye"
+    ]
+
+    if any(word in full_text for word in failure_words):
+        vibes.append("Love Failure Song")
 
     # =====================================================
     # DANCE
@@ -539,23 +395,13 @@ def detect_indian_tags(info):
     dance_words = [
         "dance",
         "party",
-        "beat",
         "club"
     ]
 
-    for word in dance_words:
+    if any(word in full_text for word in dance_words):
+        vibes.append("Dance Beat")
 
-        if word in full_text:
-            scores["Dance Beat"] += 2
-
-    final_tags = []
-
-    for tag, score in scores.items():
-
-        if score >= 3:
-            final_tags.append(tag)
-
-    return final_tags
+    return vibes
 
 # =========================================================
 # FETCH YOUTUBE METADATA
@@ -670,7 +516,6 @@ def should_update(page):
 
         props.get("Artist", {}).get("relation", []),
         props.get("Cover", {}).get("files", []),
-        props.get("Genre", {}).get("relation", []),
         props.get("Format", {}).get("relation", []),
         props.get("Language", {}).get("relation", []),
         props.get("Duration", {}).get("number"),
@@ -699,28 +544,13 @@ def update_music_page(page, info):
     )
 
     language_name = detect_language(info)
+    context = detect_context(info)
+    vibes = detect_vibes(info)
 
     print(f"Updating: {title}")
     print(f"Detected Language: {language_name}")
-
-    # =====================================================
-    # MUSICBRAINZ
-    # =====================================================
-
-    mb_genres = fetch_musicbrainz_genres(
-        title,
-        artist
-    )
-
-    indian_tags = detect_indian_tags(info)
-
-    all_genres = list(
-        set(
-            mb_genres + indian_tags
-        )
-    )
-
-    print("Genres:", all_genres)
+    print(f"Context: {context}")
+    print(f"Vibes: {vibes}")
 
     # =====================================================
     # COVER
@@ -761,34 +591,6 @@ def update_music_page(page, info):
                         "id": aid
                     }
                 ]
-            }
-
-    # =====================================================
-    # GENRES
-    # =====================================================
-
-    if not notion_props.get("Genre", {}).get("relation", []):
-
-        relations = []
-
-        for genre in all_genres:
-
-            gid = get_or_create(
-                genre,
-                genre_cache,
-                GENRE_DB_ID
-            )
-
-            if gid:
-
-                relations.append({
-                    "id": gid
-                })
-
-        if relations:
-
-            props["Genre"] = {
-                "relation": relations
             }
 
     # =====================================================
@@ -859,6 +661,49 @@ def update_music_page(page, info):
                 "date": {
                     "start": published[:10]
                 }
+            }
+
+    # =====================================================
+    # CONTEXT
+    # =====================================================
+
+    if "Context" in notion_props:
+
+        current = notion_props.get(
+            "Context",
+            {}
+        ).get("multi_select", [])
+
+        if not current:
+
+            props["Context"] = {
+                "multi_select": [
+                    {
+                        "name": context
+                    }
+                ]
+            }
+
+    # =====================================================
+    # VIBES
+    # =====================================================
+
+    if "Mood / Vibe" in notion_props:
+
+        current = notion_props.get(
+            "Mood / Vibe",
+            {}
+        ).get("multi_select", [])
+
+        if not current and vibes:
+
+            props["Mood / Vibe"] = {
+                "multi_select": [
+                    {
+                        "name": vibe
+                    }
+                    for vibe in vibes
+                ]
             }
 
     # =====================================================
