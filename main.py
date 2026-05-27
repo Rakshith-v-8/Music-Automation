@@ -1,5 +1,6 @@
 import os
 import re
+import json
 import time
 import requests
 
@@ -23,7 +24,7 @@ HEADERS = {
     "Notion-Version": "2022-06-28"
 }
 
-FUZZY_THRESHOLD = 96
+FUZZY_THRESHOLD = 85
 
 # =========================================================
 # HELPERS
@@ -421,16 +422,80 @@ def get_or_create(name, cache, db_id):
     return pid
 
 # =========================================================
+# MOVIE INFERENCE
+# =========================================================
+
+def infer_movie_name(info):
+
+    title = info.get("track", "")
+    description = info.get("description", "")
+
+    # ============================================
+    # FROM "MOVIE"
+    # ============================================
+
+    patterns = [
+
+        r'from\s+"([^"]+)"',
+        r"from\s+'([^']+)'",
+        r'movie\s*[:\-]\s*(.*)',
+        r'film\s*[:\-]\s*(.*)',
+        r'album\s*[:\-]\s*(.*)'
+    ]
+
+    combined = title + "\n" + description
+
+    for pattern in patterns:
+
+        match = re.search(
+            pattern,
+            combined,
+            flags=re.IGNORECASE
+        )
+
+        if match:
+
+            value = match.group(1).strip()
+
+            value = value.split("\n")[0].strip()
+
+            if len(value) < 80:
+                return value
+
+    # ============================================
+    # TITLE INFERENCE
+    # ============================================
+
+    known_movies = [
+
+        "salaar",
+        "leo",
+        "jailer",
+        "vikram",
+        "beast",
+        "master",
+        "pushpa",
+        "devara",
+        "coolie",
+        "kgf",
+        "kantara",
+        "rrr"
+    ]
+
+    lower = combined.lower()
+
+    for movie in known_movies:
+
+        if movie in lower:
+            return movie.title()
+
+    return None
+
+# =========================================================
 # WIKIDATA LANGUAGE
 # =========================================================
 
-def detect_language(info):
-
-    query = (
-        info.get("track", "")
-        + " "
-        + info.get("artist", "")
-    ).strip()
+def get_wikidata_language(search_term):
 
     try:
 
@@ -438,7 +503,7 @@ def detect_language(info):
             "https://www.wikidata.org/w/api.php",
             params={
                 "action": "wbsearchentities",
-                "search": query,
+                "search": search_term,
                 "language": "en",
                 "format": "json"
             },
@@ -449,25 +514,83 @@ def detect_language(info):
 
         search = data.get("search", [])
 
-        combined = json.dumps(search).lower()
+        blob = json.dumps(search).lower()
 
-        if "tamil" in combined:
-            return "Tamil"
+        mapping = {
 
-        if "telugu" in combined:
-            return "Telugu"
+            "tamil": "Tamil",
+            "telugu": "Telugu",
+            "hindi": "Hindi",
+            "kannada": "Kannada",
+            "malayalam": "Malayalam"
+        }
 
-        if "hindi" in combined:
-            return "Hindi"
+        for key, value in mapping.items():
 
-        if "kannada" in combined:
-            return "Kannada"
-
-        if "malayalam" in combined:
-            return "Malayalam"
+            if key in blob:
+                return value
 
     except:
         pass
+
+    return None
+
+# =========================================================
+# LANGUAGE DETECTION
+# =========================================================
+
+def detect_language(info):
+
+    # ============================================
+    # 1. MOVIE
+    # ============================================
+
+    movie = infer_movie_name(info)
+
+    if movie:
+
+        print(f"Movie Inferred: {movie}")
+
+        lang = get_wikidata_language(movie)
+
+        if lang:
+            return lang
+
+    # ============================================
+    # 2. ARTIST
+    # ============================================
+
+    artist = info.get("artist")
+
+    if artist:
+
+        lang = get_wikidata_language(artist)
+
+        if lang:
+            return lang
+
+    # ============================================
+    # 3. DESCRIPTION
+    # ============================================
+
+    description = info.get(
+        "description",
+        ""
+    ).lower()
+
+    mapping = {
+
+        "tamil": "Tamil",
+        "telugu": "Telugu",
+        "hindi": "Hindi",
+        "kannada": "Kannada",
+        "malayalam": "Malayalam"
+    }
+
+    for key, value in mapping.items():
+
+        if key in description:
+            return value
 
     return None
 
@@ -483,39 +606,39 @@ def detect_format(info):
     full = f"{title} {description}"
 
     if "podcast" in full:
-        return "Podcasts"
+        return "Podcast"
 
     if "dj mix" in full:
-        return "DJ Mixes"
+        return "DJ Mix"
 
     if "live performance" in full:
-        return "Live Performances"
+        return "Live Performance"
 
     if "concert" in full:
-        return "Concerts"
+        return "Concert"
 
     if "instrumental" in full:
-        return "Instrumentals"
+        return "Instrumental"
 
     if "background score" in full:
-        return "Background Scores"
+        return "Background Score"
 
     if "theme" in full:
         return "Theme Music"
 
     if "ost" in full:
-        return "OSTs"
+        return "OST"
 
     if "ep" in full:
-        return "EPs"
+        return "EP"
 
     if "album" in full:
-        return "Albums"
+        return "Album"
 
     if "single" in full:
-        return "Singles"
+        return "Single"
 
-    return "Songs"
+    return "Song"
 
 # =========================================================
 # FETCH YOUTUBE METADATA
