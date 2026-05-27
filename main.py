@@ -11,10 +11,12 @@ from thefuzz import fuzz, process
 
 NOTION_TOKEN = os.environ.get("NOTION_TOKEN")
 MAIN_DB_ID = os.environ.get("NOTION_DATABASE_ID")
+YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY")
 
 ARTIST_DB_ID = "36d451056c5e8045b879fb6a30b0b7e1"
 GENRE_DB_ID = "222451056c5e81239bc7e95a553cef45"
 FORMAT_DB_ID = "36d451056c5e8018bddfc238554cde03"
+LANGUAGE_DB_ID = "YOUR_LANGUAGE_DB_ID"
 
 HEADERS = {
     "Authorization": f"Bearer {NOTION_TOKEN}",
@@ -23,6 +25,25 @@ HEADERS = {
 }
 
 FUZZY_THRESHOLD = 96
+
+# =========================================================
+# LANGUAGE MAPPING
+# =========================================================
+
+LANGUAGE_MAP = {
+    "en": "English",
+    "hi": "Hindi",
+    "te": "Telugu",
+    "ta": "Tamil",
+    "ml": "Malayalam",
+    "kn": "Kannada",
+    "mr": "Marathi",
+    "bn": "Bengali",
+    "ja": "Japanese",
+    "ko": "Korean",
+    "zh": "Chinese",
+    "gu": "Gujarati"
+}
 
 # =========================================================
 # HELPERS
@@ -107,6 +128,7 @@ print("Loading caches...")
 artist_cache = build_cache(ARTIST_DB_ID)
 genre_cache = build_cache(GENRE_DB_ID)
 format_cache = build_cache(FORMAT_DB_ID)
+language_cache = build_cache(LANGUAGE_DB_ID)
 
 print("Caches loaded.")
 
@@ -148,60 +170,6 @@ def fuzzy_find(name, cache, threshold=FUZZY_THRESHOLD):
     return None
 
 # =========================================================
-# EXISTING RELATIONS ONLY
-# =========================================================
-
-def build_existing_relations(
-    values,
-    cache,
-    threshold
-):
-
-    relation = []
-
-    keys = list(cache.keys())
-
-    for val in values:
-
-        val = val.strip()
-
-        if not val:
-            continue
-
-        cleaned = val.lower()
-
-        # EXACT MATCH
-        if cleaned in cache:
-
-            relation.append({
-                "id": cache[cleaned]["id"]
-            })
-
-            continue
-
-        # FUZZY MATCH
-        result = process.extractOne(
-            cleaned,
-            keys,
-            scorer=fuzz.token_sort_ratio
-        )
-
-        if not result:
-            continue
-
-        match, score = result
-
-        print(f"{val} -> {match} ({score})")
-
-        if score >= threshold:
-
-            relation.append({
-                "id": cache[match]["id"]
-            })
-
-    return relation
-
-# =========================================================
 # CREATE PAGE
 # =========================================================
 
@@ -240,20 +208,14 @@ def create_page(database_id, name):
 
 def get_or_create(name, cache, db_id):
 
-    existing = fuzzy_find(
-        name,
-        cache
-    )
+    existing = fuzzy_find(name, cache)
 
     if existing:
         return existing
 
     print(f"Creating: {name}")
 
-    pid = create_page(
-        db_id,
-        name
-    )
+    pid = create_page(db_id, name)
 
     if pid:
 
@@ -265,7 +227,7 @@ def get_or_create(name, cache, db_id):
     return pid
 
 # =========================================================
-# FETCH YOUTUBE METADATA
+# YOUTUBE FETCH
 # =========================================================
 
 def fetch_youtube_metadata(url):
@@ -288,42 +250,56 @@ def fetch_youtube_metadata(url):
                 break
 
         if not video_id:
-
-            print("Invalid YouTube URL")
-
             return None
 
         # =================================================
-        # OEMBED
+        # YOUTUBE API
         # =================================================
 
-        oembed = requests.get(
-            "https://www.youtube.com/oembed",
+        response = requests.get(
+            "https://www.googleapis.com/youtube/v3/videos",
             params={
-                "url": url,
-                "format": "json"
+                "part": "snippet,contentDetails",
+                "id": video_id,
+                "key": YOUTUBE_API_KEY
             },
             timeout=20
         )
 
-        if oembed.status_code != 200:
+        data = safe_json(response)
 
-            print("oEmbed fetch failed")
+        items = data.get("items", [])
 
+        if not items:
             return None
 
-        data = oembed.json()
+        item = items[0]
 
-        title = data.get("title", "")
-        author = data.get("author_name", "")
-        thumbnail = data.get("thumbnail_url", "")
+        snippet = item.get("snippet", {})
+        details = item.get("contentDetails", {})
+
+        title = snippet.get("title", "")
+        channel = snippet.get("channelTitle", "")
+        published = snippet.get("publishedAt", "")
+        language = (
+            snippet.get("defaultAudioLanguage")
+            or snippet.get("defaultLanguage")
+        )
+
+        thumbnails = snippet.get("thumbnails", {})
+
+        thumbnail = (
+            thumbnails.get("maxres", {}).get("url")
+            or thumbnails.get("high", {}).get("url")
+            or thumbnails.get("medium", {}).get("url")
+        )
 
         # =================================================
         # CLEAN TITLE
         # =================================================
 
         track = title
-        artist = author
+        artist = channel
 
         separators = [
             " - ",
@@ -347,11 +323,13 @@ def fetch_youtube_metadata(url):
         artist = artist.replace(" - Topic", "").strip()
 
         return {
-            "title": track,
             "track": track,
             "artist": artist,
             "thumbnail": thumbnail,
-            "id": video_id
+            "published": published,
+            "language": language,
+            "duration": details.get("duration"),
+            "video_id": video_id
         }
 
     except Exception as e:
@@ -359,6 +337,29 @@ def fetch_youtube_metadata(url):
         print(f"YT ERROR: {e}")
 
         return None
+
+# =========================================================
+# ISO DURATION
+# =========================================================
+
+def parse_duration(duration):
+
+    if not duration:
+        return None
+
+    match = re.match(
+        r'PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?',
+        duration
+    )
+
+    if not match:
+        return None
+
+    hours = int(match.group(1) or 0)
+    minutes = int(match.group(2) or 0)
+    seconds = int(match.group(3) or 0)
+
+    return hours * 3600 + minutes * 60 + seconds
 
 # =========================================================
 # GENRE CLEANER
@@ -369,8 +370,7 @@ def clean_genres(info):
     genres = []
 
     title = (
-        info.get("track")
-        or info.get("title", "")
+        info.get("track", "")
     ).lower()
 
     mappings = {
@@ -411,7 +411,10 @@ def should_update(page):
         props.get("Artist", {}).get("relation", []),
         props.get("Cover", {}).get("files", []),
         props.get("Genre", {}).get("relation", []),
-        props.get("Format", {}).get("relation", [])
+        props.get("Format", {}).get("relation", []),
+        props.get("Language", {}).get("relation", []),
+        props.get("Duration", {}).get("number"),
+        props.get("Release Date", {}).get("date")
     ]
 
     if all(checks):
@@ -429,14 +432,15 @@ def update_music_page(page, info):
 
     notion_props = page.get("properties", {})
 
-    title = info.get("track") or info.get("title")
-
-    artist = (
-        info.get("artist")
-        or "Unknown Artist"
+    title = info.get("track")
+    artist = info.get("artist")
+    thumbnail = info.get("thumbnail")
+    duration = parse_duration(
+        info.get("duration")
     )
 
-    thumbnail = info.get("thumbnail")
+    published = info.get("published")
+    language_code = info.get("language")
 
     print(f"Updating: {title}")
 
@@ -444,34 +448,26 @@ def update_music_page(page, info):
     # COVER
     # =====================================================
 
-    existing_cover = notion_props.get(
-        "Cover",
-        {}
-    ).get("files", [])
+    if not notion_props.get("Cover", {}).get("files", []):
 
-    if not existing_cover and thumbnail:
+        if thumbnail:
 
-        props["Cover"] = {
-            "files": [
-                {
-                    "name": "Cover",
-                    "external": {
-                        "url": thumbnail
+            props["Cover"] = {
+                "files": [
+                    {
+                        "name": "Cover",
+                        "external": {
+                            "url": thumbnail
+                        }
                     }
-                }
-            ]
-        }
+                ]
+            }
 
     # =====================================================
     # ARTIST
     # =====================================================
 
-    existing_artist = notion_props.get(
-        "Artist",
-        {}
-    ).get("relation", [])
-
-    if not existing_artist and artist:
+    if not notion_props.get("Artist", {}).get("relation", []):
 
         aid = get_or_create(
             artist,
@@ -493,38 +489,42 @@ def update_music_page(page, info):
     # GENRE
     # =====================================================
 
-    existing_genre = notion_props.get(
-        "Genre",
-        {}
-    ).get("relation", [])
-
-    if not existing_genre:
+    if not notion_props.get("Genre", {}).get("relation", []):
 
         genres = clean_genres(info)
 
-        props["Genre"] = {
-            "relation": build_existing_relations(
-                genres,
+        relations = []
+
+        for genre in genres:
+
+            gid = get_or_create(
+                genre,
                 genre_cache,
-                threshold=80
+                GENRE_DB_ID
             )
-        }
+
+            if gid:
+
+                relations.append({
+                    "id": gid
+                })
+
+        if relations:
+
+            props["Genre"] = {
+                "relation": relations
+            }
 
     # =====================================================
     # FORMAT
     # =====================================================
 
-    existing_format = notion_props.get(
-        "Format",
-        {}
-    ).get("relation", [])
+    if not notion_props.get("Format", {}).get("relation", []):
 
-    if not existing_format:
-
-        format_id = fuzzy_find(
+        format_id = get_or_create(
             "Song",
             format_cache,
-            threshold=90
+            FORMAT_DB_ID
         )
 
         if format_id:
@@ -538,7 +538,66 @@ def update_music_page(page, info):
             }
 
     # =====================================================
-    # NOTHING TO UPDATE
+    # LANGUAGE
+    # =====================================================
+
+    if not notion_props.get("Language", {}).get("relation", []):
+
+        if language_code:
+
+            language_code = language_code.lower()
+
+            if "-" in language_code:
+                language_code = language_code.split("-")[0]
+
+            language_name = LANGUAGE_MAP.get(language_code)
+
+            if language_name:
+
+                lid = get_or_create(
+                    language_name,
+                    language_cache,
+                    LANGUAGE_DB_ID
+                )
+
+                if lid:
+
+                    props["Language"] = {
+                        "relation": [
+                            {
+                                "id": lid
+                            }
+                        ]
+                    }
+
+    # =====================================================
+    # DURATION
+    # =====================================================
+
+    if not notion_props.get("Duration", {}).get("number"):
+
+        if duration:
+
+            props["Duration"] = {
+                "number": duration
+            }
+
+    # =====================================================
+    # RELEASE DATE
+    # =====================================================
+
+    if not notion_props.get("Release Date", {}).get("date"):
+
+        if published:
+
+            props["Release Date"] = {
+                "date": {
+                    "start": published[:10]
+                }
+            }
+
+    # =====================================================
+    # PATCH
     # =====================================================
 
     if not props:
@@ -546,10 +605,6 @@ def update_music_page(page, info):
         print("Nothing to update")
 
         return False
-
-    # =====================================================
-    # PATCH
-    # =====================================================
 
     response = requests.patch(
         f"https://api.notion.com/v1/pages/{page['id']}",
@@ -600,9 +655,9 @@ def main():
                 {}
             ).get("url")
 
-            # =================================================
+            # =============================================
             # ONLY YOUTUBE URLS
-            # =================================================
+            # =============================================
 
             if not yt_link:
 
@@ -618,9 +673,9 @@ def main():
                 skipped += 1
                 continue
 
-            # =================================================
+            # =============================================
             # SKIP FILLED
-            # =================================================
+            # =============================================
 
             if not should_update(page):
 
@@ -629,15 +684,17 @@ def main():
                 skipped += 1
                 continue
 
-            # =================================================
+            # =============================================
             # FETCH METADATA
-            # =================================================
+            # =============================================
 
             metadata = fetch_youtube_metadata(
                 yt_link
             )
 
             if not metadata:
+
+                print("Metadata fetch failed")
 
                 skipped += 1
                 continue
