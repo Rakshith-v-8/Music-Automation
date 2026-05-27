@@ -288,9 +288,7 @@ def fetch_youtube_metadata(url):
 
         data = safe_json(response)
 
-        # DEBUG
         print("YOUTUBE STATUS:", response.status_code)
-        print(data)
 
         items = data.get("items", [])
 
@@ -303,8 +301,10 @@ def fetch_youtube_metadata(url):
         details = item.get("contentDetails", {})
 
         title = snippet.get("title", "")
+        description = snippet.get("description", "")
         channel = snippet.get("channelTitle", "")
         published = snippet.get("publishedAt", "")
+
         language = (
             snippet.get("defaultAudioLanguage")
             or snippet.get("defaultLanguage")
@@ -318,9 +318,9 @@ def fetch_youtube_metadata(url):
             or thumbnails.get("medium", {}).get("url")
         )
 
-        # =============================================
+        # =====================================================
         # TITLE SPLIT
-        # =============================================
+        # =====================================================
 
         track = title
         artist = channel
@@ -352,7 +352,8 @@ def fetch_youtube_metadata(url):
             "thumbnail": thumbnail,
             "published": published,
             "language": language,
-            "duration": details.get("duration")
+            "duration": details.get("duration"),
+            "description": description
         }
 
     except Exception as e:
@@ -366,34 +367,160 @@ def fetch_youtube_metadata(url):
 
 def clean_genres(info):
 
-    genres = []
+    genres = set()
 
     title = info.get("track", "").lower()
+    artist = info.get("artist", "").lower()
+    description = info.get("description", "").lower()
 
-    mappings = {
-        "hip hop": "Hip Hop",
-        "rap": "Hip Hop",
-        "rock": "Rock",
-        "metal": "Metal",
-        "pop": "Pop",
-        "jazz": "Jazz",
-        "classical": "Classical",
-        "lofi": "Lo-Fi",
-        "electronic": "Electronic",
-        "edm": "Electronic",
-        "indie": "Indie",
-        "folk": "Folk",
-        "r&b": "R&B",
-        "romantic": "Romance",
-        "love": "Romance"
-    }
+    full_text = f"{title} {artist} {description}"
 
-    for key, val in mappings.items():
+    # =====================================================
+    # SOUNDTRACK
+    # =====================================================
 
-        if key in title:
-            genres.append(val)
+    soundtrack_keywords = [
+        'from "',
+        "soundtrack",
+        "ost",
+        "provided to youtube",
+        "motion picture"
+    ]
 
-    return list(set(genres))
+    for word in soundtrack_keywords:
+
+        if word in full_text:
+            genres.add("Soundtrack")
+            break
+
+    # =====================================================
+    # ROMANCE
+    # =====================================================
+
+    romance_keywords = [
+        "love",
+        "ishq",
+        "dil",
+        "jaan",
+        "mohabbat",
+        "prema"
+    ]
+
+    for word in romance_keywords:
+
+        if word in full_text:
+            genres.add("Romance")
+            break
+
+    # =====================================================
+    # HIP HOP
+    # =====================================================
+
+    hiphop_keywords = [
+        "rap",
+        "hip hop",
+        "drill"
+    ]
+
+    for word in hiphop_keywords:
+
+        if word in full_text:
+            genres.add("Hip Hop")
+            break
+
+    # =====================================================
+    # ROCK
+    # =====================================================
+
+    rock_keywords = [
+        "rock",
+        "metal",
+        "punk"
+    ]
+
+    for word in rock_keywords:
+
+        if word in full_text:
+            genres.add("Rock")
+            break
+
+    # =====================================================
+    # ELECTRONIC
+    # =====================================================
+
+    electronic_keywords = [
+        "edm",
+        "electronic",
+        "techno",
+        "trance"
+    ]
+
+    for word in electronic_keywords:
+
+        if word in full_text:
+            genres.add("Electronic")
+            break
+
+    # =====================================================
+    # LOFI
+    # =====================================================
+
+    lofi_keywords = [
+        "lofi",
+        "lo-fi",
+        "chill mix"
+    ]
+
+    for word in lofi_keywords:
+
+        if word in full_text:
+            genres.add("Lo-Fi")
+            break
+
+    # =====================================================
+    # DEVOTIONAL
+    # =====================================================
+
+    devotional_keywords = [
+        "krishna",
+        "mahadev",
+        "allah",
+        "bhakti",
+        "devotional"
+    ]
+
+    for word in devotional_keywords:
+
+        if word in full_text:
+            genres.add("Devotional")
+            break
+
+    # =====================================================
+    # INDIAN FILM MUSIC
+    # =====================================================
+
+    indian_music_indicators = [
+        "t-series",
+        "zee music",
+        "saregama",
+        "aditya music",
+        "sony music india"
+    ]
+
+    for word in indian_music_indicators:
+
+        if word in full_text:
+            genres.add("Indian Film Music")
+            break
+
+    # =====================================================
+    # DEFAULT
+    # =====================================================
+
+    if not genres:
+        genres.add("Music")
+
+    return list(genres)
 
 # =========================================================
 # SHOULD UPDATE
@@ -608,7 +735,6 @@ def update_music_page(page, info):
     )
 
     print("PATCH STATUS:", response.status_code)
-    print(response.text)
 
     return response.status_code == 200
 
@@ -671,7 +797,7 @@ def main():
                 continue
 
             # =================================================
-            # METADATA
+            # FETCH METADATA
             # =================================================
 
             metadata = fetch_youtube_metadata(
