@@ -12,7 +12,7 @@ from thefuzz import fuzz, process
 NOTION_TOKEN = os.environ.get("NOTION_TOKEN")
 MAIN_DB_ID = os.environ.get("NOTION_DATABASE_ID")
 
-ARTIST_DB_ID = "21e451056c5e814d9c19d39545e1ce9c"
+ARTIST_DB_ID = "36d451056c5e8045b879fb6a30b0b7e1"
 GENRE_DB_ID = "222451056c5e81239bc7e95a553cef45"
 FORMAT_DB_ID = "36d451056c5e8018bddfc238554cde03"
 
@@ -22,7 +22,7 @@ HEADERS = {
     "Notion-Version": "2022-06-28"
 }
 
-FUZZY_THRESHOLD = 92
+FUZZY_THRESHOLD = 96
 
 # =========================================================
 # HELPERS
@@ -125,6 +125,9 @@ def fuzzy_find(name, cache, threshold=FUZZY_THRESHOLD):
         return cache[cleaned]["id"]
 
     keys = list(cache.keys())
+
+    if not keys:
+        return None
 
     result = process.extractOne(
         cleaned,
@@ -271,10 +274,6 @@ def fetch_youtube_metadata(url):
 
         video_id = None
 
-        # ============================================
-        # EXTRACT VIDEO ID
-        # ============================================
-
         patterns = [
             r"v=([a-zA-Z0-9_-]+)",
             r"youtu\.be/([a-zA-Z0-9_-]+)"
@@ -294,9 +293,9 @@ def fetch_youtube_metadata(url):
 
             return None
 
-        # ============================================
-        # OEMBED API
-        # ============================================
+        # =================================================
+        # OEMBED
+        # =================================================
 
         oembed = requests.get(
             "https://www.youtube.com/oembed",
@@ -319,9 +318,9 @@ def fetch_youtube_metadata(url):
         author = data.get("author_name", "")
         thumbnail = data.get("thumbnail_url", "")
 
-        # ============================================
+        # =================================================
         # CLEAN TITLE
-        # ============================================
+        # =================================================
 
         track = title
         artist = author
@@ -344,6 +343,8 @@ def fetch_youtube_metadata(url):
                     track = right.strip()
 
                     break
+
+        artist = artist.replace(" - Topic", "").strip()
 
         return {
             "title": track,
@@ -595,7 +596,7 @@ def main():
             props = page.get("properties", {})
 
             yt_link = props.get(
-                "Url",
+                "URL",
                 {}
             ).get("url")
 
