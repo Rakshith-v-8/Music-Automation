@@ -27,7 +27,7 @@ HEADERS = {
 FUZZY_THRESHOLD = 96
 
 # =========================================================
-# LANGUAGE MAPPING
+# LANGUAGE MAP
 # =========================================================
 
 LANGUAGE_MAP = {
@@ -39,10 +39,10 @@ LANGUAGE_MAP = {
     "kn": "Kannada",
     "mr": "Marathi",
     "bn": "Bengali",
+    "gu": "Gujarati",
     "ja": "Japanese",
     "ko": "Korean",
-    "zh": "Chinese",
-    "gu": "Gujarati"
+    "zh": "Chinese"
 }
 
 # =========================================================
@@ -92,7 +92,7 @@ def fetch_all_pages(database_id):
     return pages
 
 # =========================================================
-# CACHE
+# BUILD CACHE
 # =========================================================
 
 def build_cache(database_id):
@@ -227,7 +227,30 @@ def get_or_create(name, cache, db_id):
     return pid
 
 # =========================================================
-# YOUTUBE FETCH
+# PARSE DURATION
+# =========================================================
+
+def parse_duration(duration):
+
+    if not duration:
+        return None
+
+    match = re.match(
+        r'PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?',
+        duration
+    )
+
+    if not match:
+        return None
+
+    hours = int(match.group(1) or 0)
+    minutes = int(match.group(2) or 0)
+    seconds = int(match.group(3) or 0)
+
+    return hours * 3600 + minutes * 60 + seconds
+
+# =========================================================
+# FETCH YOUTUBE METADATA
 # =========================================================
 
 def fetch_youtube_metadata(url):
@@ -250,11 +273,8 @@ def fetch_youtube_metadata(url):
                 break
 
         if not video_id:
+            print("Invalid video id")
             return None
-
-        # =================================================
-        # YOUTUBE API
-        # =================================================
 
         response = requests.get(
             "https://www.googleapis.com/youtube/v3/videos",
@@ -267,6 +287,10 @@ def fetch_youtube_metadata(url):
         )
 
         data = safe_json(response)
+
+        # DEBUG
+        print("YOUTUBE STATUS:", response.status_code)
+        print(data)
 
         items = data.get("items", [])
 
@@ -294,9 +318,9 @@ def fetch_youtube_metadata(url):
             or thumbnails.get("medium", {}).get("url")
         )
 
-        # =================================================
-        # CLEAN TITLE
-        # =================================================
+        # =============================================
+        # TITLE SPLIT
+        # =============================================
 
         track = title
         artist = channel
@@ -328,50 +352,23 @@ def fetch_youtube_metadata(url):
             "thumbnail": thumbnail,
             "published": published,
             "language": language,
-            "duration": details.get("duration"),
-            "video_id": video_id
+            "duration": details.get("duration")
         }
 
     except Exception as e:
 
-        print(f"YT ERROR: {e}")
-
+        print("YT ERROR:", e)
         return None
 
 # =========================================================
-# ISO DURATION
-# =========================================================
-
-def parse_duration(duration):
-
-    if not duration:
-        return None
-
-    match = re.match(
-        r'PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?',
-        duration
-    )
-
-    if not match:
-        return None
-
-    hours = int(match.group(1) or 0)
-    minutes = int(match.group(2) or 0)
-    seconds = int(match.group(3) or 0)
-
-    return hours * 3600 + minutes * 60 + seconds
-
-# =========================================================
-# GENRE CLEANER
+# GENRES
 # =========================================================
 
 def clean_genres(info):
 
     genres = []
 
-    title = (
-        info.get("track", "")
-    ).lower()
+    title = info.get("track", "").lower()
 
     mappings = {
         "hip hop": "Hip Hop",
@@ -417,10 +414,7 @@ def should_update(page):
         props.get("Release Date", {}).get("date")
     ]
 
-    if all(checks):
-        return False
-
-    return True
+    return not all(checks)
 
 # =========================================================
 # UPDATE PAGE
@@ -435,12 +429,12 @@ def update_music_page(page, info):
     title = info.get("track")
     artist = info.get("artist")
     thumbnail = info.get("thumbnail")
+    published = info.get("published")
+    language_code = info.get("language")
+
     duration = parse_duration(
         info.get("duration")
     )
-
-    published = info.get("published")
-    language_code = info.get("language")
 
     print(f"Updating: {title}")
 
@@ -521,18 +515,18 @@ def update_music_page(page, info):
 
     if not notion_props.get("Format", {}).get("relation", []):
 
-        format_id = get_or_create(
+        fid = get_or_create(
             "Song",
             format_cache,
             FORMAT_DB_ID
         )
 
-        if format_id:
+        if fid:
 
             props["Format"] = {
                 "relation": [
                     {
-                        "id": format_id
+                        "id": fid
                     }
                 ]
             }
@@ -603,7 +597,6 @@ def update_music_page(page, info):
     if not props:
 
         print("Nothing to update")
-
         return False
 
     response = requests.patch(
@@ -614,17 +607,10 @@ def update_music_page(page, info):
         }
     )
 
-    if response.status_code == 200:
+    print("PATCH STATUS:", response.status_code)
+    print(response.text)
 
-        print(f"Updated: {title}")
-
-        return True
-
-    else:
-
-        print(response.text)
-
-        return False
+    return response.status_code == 200
 
 # =========================================================
 # MAIN
@@ -655,9 +641,9 @@ def main():
                 {}
             ).get("url")
 
-            # =============================================
-            # ONLY YOUTUBE URLS
-            # =============================================
+            # =================================================
+            # URL CHECK
+            # =================================================
 
             if not yt_link:
 
@@ -673,9 +659,9 @@ def main():
                 skipped += 1
                 continue
 
-            # =============================================
+            # =================================================
             # SKIP FILLED
-            # =============================================
+            # =================================================
 
             if not should_update(page):
 
@@ -684,9 +670,9 @@ def main():
                 skipped += 1
                 continue
 
-            # =============================================
-            # FETCH METADATA
-            # =============================================
+            # =================================================
+            # METADATA
+            # =================================================
 
             metadata = fetch_youtube_metadata(
                 yt_link
@@ -713,7 +699,7 @@ def main():
 
         except Exception as e:
 
-            print(f"ERROR: {e}")
+            print("MAIN ERROR:", e)
 
     print("================================")
     print(f"Updated: {updated}")
