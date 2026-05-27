@@ -57,6 +57,34 @@ def clean_track_title(title):
         r"\(from '.*?'\)",
 
         # =================================================
+        # LANGUAGE TAGS
+        # =================================================
+
+        r'\(telugu version\)',
+        r'\(hindi version\)',
+        r'\(tamil version\)',
+        r'\(kannada version\)',
+        r'\(malayalam version\)',
+
+        r'\(telugu\)',
+        r'\(hindi\)',
+        r'\(tamil\)',
+        r'\(kannada\)',
+        r'\(malayalam\)',
+
+        r'\[telugu version\]',
+        r'\[hindi version\]',
+        r'\[tamil version\]',
+        r'\[kannada version\]',
+        r'\[malayalam version\]',
+
+        r'\[telugu\]',
+        r'\[hindi\]',
+        r'\[tamil\]',
+        r'\[kannada\]',
+        r'\[malayalam\]',
+
+        # =================================================
         # FEAT / FT
         # =================================================
 
@@ -97,6 +125,10 @@ def clean_track_title(title):
         r'\[4k.*?\]',
         r'\[hd.*?\]',
 
+        # =================================================
+        # RAW WORDS
+        # =================================================
+
         r'official video',
         r'official lyric video',
         r'lyric video',
@@ -117,11 +149,35 @@ def clean_track_title(title):
             flags=re.IGNORECASE
         )
 
+    # =====================================================
+    # REMOVE EMPTY BRACKETS
+    # =====================================================
+
+    cleaned = re.sub(
+        r'\(\s*\)',
+        '',
+        cleaned
+    )
+
+    cleaned = re.sub(
+        r'\[\s*\]',
+        '',
+        cleaned
+    )
+
+    # =====================================================
+    # CLEAN SPACES
+    # =====================================================
+
     cleaned = re.sub(
         r'\s+',
         ' ',
         cleaned
     ).strip()
+
+    # =====================================================
+    # REMOVE DANGLING SYMBOLS
+    # =====================================================
 
     cleaned = cleaned.strip("-|:[]() ")
 
@@ -528,7 +584,7 @@ def fetch_youtube_metadata(url):
         response = requests.get(
             "https://www.googleapis.com/youtube/v3/videos",
             params={
-                "part": "snippet,contentDetails",
+                "part": "snippet",
                 "id": video_id,
                 "key": YOUTUBE_API_KEY
             },
