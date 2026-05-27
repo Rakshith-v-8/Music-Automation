@@ -128,6 +128,62 @@ def clean_track_title(title):
     return cleaned
 
 # =========================================================
+# EXTRACT SINGERS
+# =========================================================
+
+def extract_singers(description):
+
+    if not description:
+        return []
+
+    lines = description.splitlines()
+
+    singers = []
+
+    patterns = [
+
+        r'playback singer[s]?\s*[:\-]\s*(.*)',
+        r'singer[s]?\s*[:\-]\s*(.*)',
+        r'vocals\s*[:\-]\s*(.*)',
+        r'performed by\s*[:\-]\s*(.*)'
+    ]
+
+    for line in lines:
+
+        clean_line = line.strip()
+
+        for pattern in patterns:
+
+            match = re.search(
+                pattern,
+                clean_line,
+                flags=re.IGNORECASE
+            )
+
+            if match:
+
+                raw = match.group(1)
+
+                parts = re.split(
+                    r',|&| and ',
+                    raw
+                )
+
+                for part in parts:
+
+                    name = part.strip()
+
+                    if (
+                        len(name) > 1
+                        and len(name) < 60
+                    ):
+                        singers.append(name)
+
+    singers = list(dict.fromkeys(singers))
+
+    return singers
+
+# =========================================================
 # FETCH ALL PAGES
 # =========================================================
 
@@ -295,29 +351,6 @@ def get_or_create(name, cache, db_id):
         }
 
     return pid
-
-# =========================================================
-# PARSE DURATION
-# =========================================================
-
-def parse_duration(duration):
-
-    if not duration:
-        return None
-
-    match = re.match(
-        r'PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?',
-        duration
-    )
-
-    if not match:
-        return None
-
-    hours = int(match.group(1) or 0)
-    minutes = int(match.group(2) or 0)
-    seconds = int(match.group(3) or 0)
-
-    return hours * 3600 + minutes * 60 + seconds
 
 # =========================================================
 # LANGUAGE DETECTION
@@ -514,7 +547,6 @@ def fetch_youtube_metadata(url):
         item = items[0]
 
         snippet = item.get("snippet", {})
-        details = item.get("contentDetails", {})
 
         raw_title = snippet.get("title", "")
 
@@ -556,12 +588,14 @@ def fetch_youtube_metadata(url):
 
         artist = artist.replace(" - Topic", "").strip()
 
+        singers = extract_singers(description)
+
         return {
             "track": track,
             "artist": artist,
+            "singers": singers,
             "thumbnail": thumbnail,
             "published": published,
-            "duration": details.get("duration"),
             "description": description
         }
 
@@ -569,26 +603,6 @@ def fetch_youtube_metadata(url):
 
         print("YT ERROR:", e)
         return None
-
-# =========================================================
-# SHOULD UPDATE
-# =========================================================
-
-def should_update(page):
-
-    props = page.get("properties", {})
-
-    checks = [
-
-        props.get("Artist", {}).get("relation", []),
-        props.get("Cover", {}).get("files", []),
-        props.get("Format", {}).get("relation", []),
-        props.get("Language", {}).get("relation", []),
-        props.get("Duration", {}).get("number"),
-        props.get("Release Date", {}).get("date")
-    ]
-
-    return not all(checks)
 
 # =========================================================
 # UPDATE PAGE
@@ -602,12 +616,10 @@ def update_music_page(page, info):
 
     title = info.get("track")
     artist = info.get("artist")
+    singers = info.get("singers", [])
+
     thumbnail = info.get("thumbnail")
     published = info.get("published")
-
-    duration = parse_duration(
-        info.get("duration")
-    )
 
     language_name = detect_language(info)
     context = detect_context(info)
@@ -615,6 +627,7 @@ def update_music_page(page, info):
 
     print(f"Updating: {title}")
     print(f"Detected Language: {language_name}")
+    print(f"Singers: {singers}")
     print(f"Context: {context}")
     print(f"Vibes: {vibes}")
 
@@ -671,25 +684,40 @@ def update_music_page(page, info):
             }
 
     # =====================================================
-    # ARTIST
+    # ARTISTS + SINGERS
     # =====================================================
 
-    if not notion_props.get("Artist", {}).get("relation", []):
+    current_artists = notion_props.get(
+        "Artist",
+        {}
+    ).get("relation", [])
 
-        aid = get_or_create(
-            artist,
-            artist_cache,
-            ARTIST_DB_ID
-        )
+    if not current_artists:
 
-        if aid:
+        all_artists = [artist] + singers
+
+        all_artists = list(dict.fromkeys(all_artists))
+
+        relations = []
+
+        for artist_name in all_artists:
+
+            aid = get_or_create(
+                artist_name,
+                artist_cache,
+                ARTIST_DB_ID
+            )
+
+            if aid:
+
+                relations.append({
+                    "id": aid
+                })
+
+        if relations:
 
             props["Artist"] = {
-                "relation": [
-                    {
-                        "id": aid
-                    }
-                ]
+                "relation": relations
             }
 
     # =====================================================
@@ -734,18 +762,6 @@ def update_music_page(page, info):
                         "id": lid
                     }
                 ]
-            }
-
-    # =====================================================
-    # DURATION
-    # =====================================================
-
-    if not notion_props.get("Duration", {}).get("number"):
-
-        if duration:
-
-            props["Duration"] = {
-                "number": duration
             }
 
     # =====================================================
