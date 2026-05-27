@@ -2,7 +2,6 @@ import os
 import re
 import time
 import requests
-import yt_dlp
 
 from thefuzz import fuzz, process
 
@@ -263,26 +262,96 @@ def get_or_create(name, cache, db_id):
     return pid
 
 # =========================================================
-# YOUTUBE FETCH
+# FETCH YOUTUBE METADATA
 # =========================================================
 
 def fetch_youtube_metadata(url):
 
     try:
 
-        ydl_opts = {
-            "quiet": True,
-            "extract_flat": False
+        video_id = None
+
+        # ============================================
+        # EXTRACT VIDEO ID
+        # ============================================
+
+        patterns = [
+            r"v=([a-zA-Z0-9_-]+)",
+            r"youtu\.be/([a-zA-Z0-9_-]+)"
+        ]
+
+        for pattern in patterns:
+
+            match = re.search(pattern, url)
+
+            if match:
+                video_id = match.group(1)
+                break
+
+        if not video_id:
+
+            print("Invalid YouTube URL")
+
+            return None
+
+        # ============================================
+        # OEMBED API
+        # ============================================
+
+        oembed = requests.get(
+            "https://www.youtube.com/oembed",
+            params={
+                "url": url,
+                "format": "json"
+            },
+            timeout=20
+        )
+
+        if oembed.status_code != 200:
+
+            print("oEmbed fetch failed")
+
+            return None
+
+        data = oembed.json()
+
+        title = data.get("title", "")
+        author = data.get("author_name", "")
+        thumbnail = data.get("thumbnail_url", "")
+
+        # ============================================
+        # CLEAN TITLE
+        # ============================================
+
+        track = title
+        artist = author
+
+        separators = [
+            " - ",
+            " | ",
+            " — "
+        ]
+
+        for sep in separators:
+
+            if sep in title:
+
+                left, right = title.split(sep, 1)
+
+                if len(left) < 40:
+
+                    artist = left.strip()
+                    track = right.strip()
+
+                    break
+
+        return {
+            "title": track,
+            "track": track,
+            "artist": artist,
+            "thumbnail": thumbnail,
+            "id": video_id
         }
-
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-
-            info = ydl.extract_info(
-                url,
-                download=False
-            )
-
-            return info
 
     except Exception as e:
 
@@ -297,11 +366,6 @@ def fetch_youtube_metadata(url):
 def clean_genres(info):
 
     genres = []
-
-    yt_genres = info.get("genres", [])
-
-    if yt_genres:
-        genres.extend(yt_genres)
 
     title = (
         info.get("track")
@@ -321,7 +385,9 @@ def clean_genres(info):
         "edm": "Electronic",
         "indie": "Indie",
         "folk": "Folk",
-        "r&b": "R&B"
+        "r&b": "R&B",
+        "romantic": "Romance",
+        "love": "Romance"
     }
 
     for key, val in mappings.items():
@@ -366,7 +432,6 @@ def update_music_page(page, info):
 
     artist = (
         info.get("artist")
-        or info.get("uploader")
         or "Unknown Artist"
     )
 
@@ -530,7 +595,7 @@ def main():
             props = page.get("properties", {})
 
             yt_link = props.get(
-                "url",
+                "Url",
                 {}
             ).get("url")
 
